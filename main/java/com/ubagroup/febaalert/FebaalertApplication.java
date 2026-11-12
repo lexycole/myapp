@@ -8,8 +8,12 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import java.util.Date;
 
 /**
+ * FEBA ALERT – Background Email Notification Service: FEBA ALERT is a background service (not an api endpoint)
+ * designed to notify bank customers via email about their login activities, including successful logins,
+ * failed login attempts, and password resets when using the UBA Internet Banking web application to process transactions.
+ *
  *  @author: Olawale Akinro
- *  @version: 2.0
+ * @version: 2.0
  */
 
 @SpringBootApplication
@@ -28,5 +32,4 @@ public class FebaalertApplication {
         LOG.info(banner);
         SpringApplication.run(FebaalertApplication.class, args);
     }
-
 }

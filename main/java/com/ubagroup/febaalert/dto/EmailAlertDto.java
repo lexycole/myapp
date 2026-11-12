@@ -7,15 +7,10 @@ package com.ubagroup.febaalert.dto;
  * Plain Strings: callers get ready-to-use text, no casting or Clob handling.
  * </p>
  *
- * @param address
- * @param alertSubject
- * @param alertMesg
- * @param alertName
- *
  * @author olawale akinto
  * @version 2.0
+ * @since 1.0
  */
-
 public record EmailAlertDto(
         String address,
         String alertSubject,

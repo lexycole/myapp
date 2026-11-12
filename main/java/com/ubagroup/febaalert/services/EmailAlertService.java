@@ -1,6 +1,7 @@
 package com.ubagroup.febaalert.services;
 
 import com.ubagroup.febaalert.dto.EmailAlertDto;
+import com.ubagroup.febaalert.exceptions.PermanentEmailException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -18,19 +19,20 @@ import static com.ubagroup.febaalert.util.EmailAlertUtil.textValue;
 /**
  * Validates one email alert and sends it as an HTML email over SMTP.
  * <p>
- * Called by {@code EmailAlertScheduler.processDueJobs} for each due job. It re-checks the
- * alert name against {@code CONFIRM_ALERT_NAME} and validates the recipient address.
- * It then renders the Thymeleaf template {@code email/alert} with the inline banner image
- * and hands the message to {@link org.springframework.mail.javamail.JavaMailSender}.
+ *  Called by {@code EmailAlertScheduler.processDueJobs} for each due job. It re-checks the
+ *  alert name against {@code CONFIRM_ALERT_NAME} and validates the recipient address.
+ *  It then renders the Thymeleaf template {@code email/alert} with the inline banner image
+ *  and hands the message to {@link org.springframework.mail.javamail.JavaMailSender}.
  * </p>
  * <p>
- * Failures are split in two so the scheduler can react correctly:
- * bad data throws {@link PermanentEmailException} (job goes to FAILED, no retry),
- * and temporary errors such as SMTP downtime return {@code false} (job is retried).
+ *  Failures are split in two so the scheduler can react correctly:
+ *  bad data throws {@link PermanentEmailException} (job goes to FAILED, no retry),
+ *  and temporary errors such as SMTP downtime return {@code false} (job is retried).
  * </p>
  *
  * @author Olawale Akinro
  * @version 2.0
+ * @since 1.0
  */
 @Service
 public class EmailAlertService {
@@ -95,7 +97,7 @@ public class EmailAlertService {
             }
 
 //            String toAddress = alert.address() == null ? "" : textValue(alert.address()).trim();
-            String toAddress = "wale.ade@bbdgroup.com";
+            String toAddress = "wal2.walew@ubagroup.com";
 
             if (toAddress.isBlank()) {
                 throw new PermanentEmailException("address is missing");
@@ -137,7 +139,7 @@ public class EmailAlertService {
 
             helper.setFrom(fromAddress);
             helper.setTo(to);
-            helper.setCc(new String[] {"wale.bo2@bbdgroup.com", "wale.bo3@bbdgroup.com", textValue(alert.address()).trim()});
+            helper.setCc(new String[] {"wal3.walew@ubagroup.com", "wal7.walew@ubagroup.com", textValue(alert.address()).trim()});
             helper.setSubject(subject);
             helper.setText(html, true);
 

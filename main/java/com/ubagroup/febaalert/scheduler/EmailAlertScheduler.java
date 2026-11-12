@@ -2,10 +2,11 @@ package com.ubagroup.febaalert.scheduler;
 
 import com.ubagroup.febaalert.dto.EmailAlertDto;
 import com.ubagroup.febaalert.repository.EmailAlertRepository;
+import com.ubagroup.febaalert.repository.EmailAlertRepository.RecentEmailAlertRow;
 import com.ubagroup.febaalert.repository.EmailJobRepository;
 import com.ubagroup.febaalert.repository.EmailJobRepository.EmailJob;
 import com.ubagroup.febaalert.services.EmailAlertService;
-import com.ubagroup.febaalert.services.PermanentEmailException;
+import com.ubagroup.febaalert.exceptions.PermanentEmailException;
 import com.ubagroup.febaalert.util.EmailAlertUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,10 +18,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HexFormat;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.HashMap;
+import java.util.Map;
+import java.sql.Timestamp;
+
 
 /**
  * Polls Oracle for recent alerts, queues them as jobs in Postgres, and sends the jobs that are due.
@@ -36,6 +39,7 @@ import java.util.HashMap;
  *
  * @author Olawale Akinro
  * @version 2.0
+ * @since 1.0
  */
 @Component
 public class EmailAlertScheduler {
@@ -58,7 +62,7 @@ public class EmailAlertScheduler {
     /**
      * Creates the scheduler and parses the allowed alert names.
      * <p>
-     * {@code confirmAlertName} is split on commas, trimmed, and blank entries are dropped.
+     *  {@code confirmAlertName} is split on commas, trimmed, and blank entries are dropped.
      * </p>
      *
      * @param emailAlertService    sends one alert as an HTML email
@@ -88,10 +92,10 @@ public class EmailAlertScheduler {
     /**
      * Runs one polling cycle.
      * <p>
-     * Uses {@code fixedDelay} ({@code EMAIL_JOB_POLL_MS}), so the next run starts only after
-     * this one finishes (no overlap on one instance). Order matters: free stuck jobs,
-     * queue new alerts, then send what is due. A failure while queuing is logged and does not
-     * stop the sending step.
+     *  Uses {@code fixedDelay} ({@code EMAIL_JOB_POLL_MS}), so the next run starts only after
+     *  this one finishes (no overlap on one instance). Order matters: free stuck jobs,
+     *  queue new alerts, then send what is due. A failure while queuing is logged and does not
+     *  stop the sending step.
      * </p>
      *
      * @throws RuntimeException if {@code releaseStuck} or {@code claimDue} fails on the database;
@@ -118,9 +122,9 @@ public class EmailAlertScheduler {
     /**
      * Reads recent Oracle alerts and queues new email jobs in Postgres.
      * <p>
-     * Reads {@code lookbackMin + 1} minutes. The extra minute feeds the login duplicate check only.
-     * A row is skipped when its alert name is not in {@code CONFIRM_ALERT_NAME} or when
-     * its address has no {@code @} (phone-number rows). The duplicate key depends on the alert type:
+     *  Reads {@code lookbackMin + 1} minutes. The extra minute feeds the login duplicate check only.
+     *  A row is skipped when its alert name is not in {@code CONFIRM_ALERT_NAME} or when
+     *  its address has no {@code @} (phone-number rows). The duplicate key depends on the alert type:
      * </p>
      * <ul>
      *   <li>{@code LGIN_SUCC}: Oracle writes two rows per login, so only the first row per
@@ -131,7 +135,7 @@ public class EmailAlertScheduler {
      *   <li>Other alerts: key includes sequence, address, name, subject and message. Key prefix {@code v3}.</li>
      * </ul>
      * <p>
-     * A job is created only if {@code jobs.enqueue} accepts the key (DB-level dedup).
+     *  A job is created only if {@code jobs.enqueue} accepts the key (DB-level dedup).
      * </p>
      *
      * @throws IllegalStateException if the Oracle query or a Clob read fails; {@link #tick()} catches it
@@ -143,22 +147,19 @@ public class EmailAlertScheduler {
         // Last login time seen per user. A row within 5s of it is a duplicate.
         Map<String, Long> lastLogin = new HashMap<>();
         // One extra minute, so rows just outside the window still feed the duplicate check.
-        for (Map<String, Object> row : emailAlertRepository.findRecent(lookbackMin + 1)) {
+        for (RecentEmailAlertRow row : emailAlertRepository.findRecent(lookbackMin + 1)) {
             log.info("In the loop, this is the value of row: {}", row);
 
-            // Oracle returns raw values (ALERT_MESG may be a Clob, columns may be null).
-            // toDto() converts each to a String ("" if null), so the Clob is read while the DB row is still available.
-            EmailAlertDto a = EmailAlertUtil.toDto(row);
-
-            String name = EmailAlertUtil.textValue(a.alertName());
+            // Columns are mapped to typed fields by the repository (ALERT_MESG is read as a String there).
+            String name = EmailAlertUtil.textValue(row.alertName());
             // Only alert types listed in CONFIRM_ALERT_NAME get emailed.
             if (name == null || !allowedAlertNames.contains(name.trim())) {
                 continue;
             }
-            String rawAddress = EmailAlertUtil.textValue(a.address());
+            String rawAddress = EmailAlertUtil.textValue(row.address());
             String address = rawAddress == null ? null : rawAddress.trim();
-            String subject = EmailAlertUtil.textValue(a.alertSubject());
-            String message = EmailAlertUtil.textValue(a.alertMesg());
+            String subject = EmailAlertUtil.textValue(row.alertSubject());
+            String message = EmailAlertUtil.textValue(row.alertMesg());
 
             log.info("this is the value of alert name: {}", name);
 
@@ -171,14 +172,13 @@ public class EmailAlertScheduler {
             String key;
             // Oracle writes two rows per login, so keep only the first one per address within 5 seconds.
             if ("LGIN_SUCC".equals(n)) {
-                log.info("Start success login alerts queue. this is the value of row.get(CRE_TS): {}", row.get("CRE_TS"));
-                Object c = row.get("CRE_TS");
-                // Pattern matching: checks the type and casts in one step.
-                if (!(c instanceof java.util.Date cd)) {
-                    log.error("LGIN_SUCC without usable CRE_TS ({}); skipped", c);
+                log.info("Start success login alerts queue. this is the value of row.creTs(): {}", row.creTs());
+                Timestamp creTs = row.creTs();
+                if (creTs == null) {
+                    log.error("LGIN_SUCC without usable CRE_TS ({}); skipped", creTs);
                     continue;
                 }
-                long ts = cd.getTime() / 1000;
+                long ts = creTs.getTime() / 1000;
                 String who = address.toLowerCase();
                 Long anchor = lastLogin.get(who);
                 if (anchor != null && ts - anchor <= LOGIN_DUP_WINDOW_SEC) {
@@ -186,16 +186,16 @@ public class EmailAlertScheduler {
                 }
                 lastLogin.put(who, ts);
                 // Older rows were fetched only to feed the duplicate check, so don't queue them.
-                Object ageNum = row.get("AGE_SEC");
-                if (ageNum instanceof Number ageSec && ageSec.doubleValue() > lookbackMin * 60.0) {
+                Long ageSec = row.ageSec();
+                if (ageSec != null && ageSec.doubleValue() > lookbackMin * 60.0) {
                     continue; // margin row: only feeds the anchor map
                 }
-                key = sha256(String.join("|", "login-v4", String.valueOf(c), who, n));
+                key = sha256(String.join("|", "login-v4", String.valueOf(creTs), who, n));
             } else if ("LGIN_FAIL".equals(n)) {
                 // Each failed attempt has its own ALERT_SEQ_NUM, so the key is unique per attempt.
                 log.info(">>>>>>>>>>>>>> Start failed login alerts queue >>>>>>>>>>>");
                 key = sha256(String.join("|", "fail-v1",
-                        String.valueOf(row.get("ALERT_SEQ_NUM") != null ? row.get("ALERT_SEQ_NUM") : row.get("CRE_TS")),
+                        row.alertSeqNum() != null ? String.valueOf(row.alertSeqNum()) : String.valueOf(row.creTs()),
                         address.toLowerCase(),
                         n));
             } else {
@@ -203,7 +203,7 @@ public class EmailAlertScheduler {
                 log.info(">>>>>>>>>> FOR OTHER ALERTS: Start other alerts queue >>>>>>>>>>>");
                 // Fixed-length unique key. It is stored in source_alert_id for the DB-level dedup.
                 key = sha256(String.join("|", "v3",
-                        String.valueOf(row.get("ALERT_SEQ_NUM") != null ? row.get("ALERT_SEQ_NUM") : row.get("CRE_TS")),
+                        row.alertSeqNum() != null ? String.valueOf(row.alertSeqNum()) : String.valueOf(row.creTs()),
                         address.toLowerCase(),
                         n,
                         subject == null ? "" : subject.trim(),
